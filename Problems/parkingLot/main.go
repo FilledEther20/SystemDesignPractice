@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"strconv"
 	"sync"
 	"time"
 )
@@ -25,17 +24,13 @@ const (
 )
 
 func (v VehicleSize) String() string {
-	var arr = [...]string{"Small", "Medium", "Large"}
-	return arr[v]
+	return [...]string{"Small", "Medium", "Large"}[v]
 }
 
 func (s SpotType) String() string {
 	return [...]string{"Compact", "Regular", "Oversized"}[s]
 }
 
-/*
-	Objects
-*/
 
 type Vehicle struct {
 	LicensePlate string
@@ -43,44 +38,46 @@ type Vehicle struct {
 }
 
 type ParkingSpot struct {
-	SpotID         string
+	ID             int
 	Type           SpotType
 	IsOccupied     bool
 	CurrentVehicle *Vehicle
 }
 
-func (p *ParkingSpot) CanFit(v *Vehicle) bool {
-	if p.IsOccupied {
-		return false
-	}
-	return int(p.Type) >= int(v.Size)
+func (ps *ParkingSpot) CanFit(v *Vehicle) bool {
+	return int(ps.Type) >= int(v.Size)
 }
 
-func (p *ParkingSpot) Occupy(v *Vehicle) {
-	p.IsOccupied = true
-	p.CurrentVehicle = v
+// Occupy assigns a vehicle to the spot.
+func (ps *ParkingSpot) Occupy(v *Vehicle) {
+	ps.IsOccupied = true
+	ps.CurrentVehicle = v
 }
 
-func (p *ParkingSpot) Vacate() {
-	p.IsOccupied = false
-	p.CurrentVehicle = nil
+// Vacate removes the vehicle from the spot.
+func (ps *ParkingSpot) Vacate() {
+	ps.IsOccupied = false
+	ps.CurrentVehicle = nil
 }
 
+// Ticket represents the contract for the parking session.
 type Ticket struct {
 	ID           string
 	VehiclePlate string
-	SpotID       string
+	SpotID       int
 	EntryTime    time.Time
 }
 
-/*
-Strategy Pattern for fees calculation
-*/
+// ==========================================
+// 3. Strategy Pattern for Fees
+// ==========================================
 
+// FareStrategy defines the interface for calculating parking fees.
 type FareStrategy interface {
-	Calculate(t Ticket, vsize VehicleSize, duration float64) float64
+	Calculate(t Ticket, vSize VehicleSize, durationHours float64) float64
 }
 
+// BaseFareStrategy implements standard hourly rates.
 type BaseFareStrategy struct{}
 
 func (b *BaseFareStrategy) Calculate(t Ticket, vSize VehicleSize, durationHours float64) float64 {
@@ -101,13 +98,14 @@ type PeakHoursFareStrategy struct{}
 func (p *PeakHoursFareStrategy) Calculate(t Ticket, vSize VehicleSize, durationHours float64) float64 {
 	baseStrategy := &BaseFareStrategy{}
 	baseFee := baseStrategy.Calculate(t, vSize, durationHours)
-
+	
 	currentHour := time.Now().Hour()
 	if currentHour >= 17 && currentHour <= 20 {
-		return baseFee * 1.5
+		return baseFee * 1.5 
 	}
 	return baseFee
 }
+
 
 type FareCalculator struct {
 	strategy FareStrategy
@@ -122,13 +120,14 @@ func (fc *FareCalculator) CalculateFee(t Ticket, vSize VehicleSize) float64 {
 	return fc.strategy.Calculate(t, vSize, hours)
 }
 
-/*
-	ParkingManager
-*/
+// ==========================================
+// 4. Logic Components (Manager)
+// ==========================================
 
+// ParkingManager manages the allocation and release of spots.
 type ParkingManager struct {
 	spots []*ParkingSpot
-	mu    sync.RWMutex
+	mu    sync.RWMutex // Ensures thread safety for concurrent access
 }
 
 func NewParkingManager(numCompact, numRegular, numOversized int) *ParkingManager {
@@ -139,7 +138,7 @@ func NewParkingManager(numCompact, numRegular, numOversized int) *ParkingManager
 	addSpots := func(count int, sType SpotType) {
 		for i := 0; i < count; i++ {
 			manager.spots = append(manager.spots, &ParkingSpot{
-				SpotID: strconv.Itoa(idCounter), Type: sType,
+				ID: idCounter, Type: sType,
 			})
 			idCounter++
 		}
@@ -160,15 +159,15 @@ func (pm *ParkingManager) FindAndAssignSpot(v *Vehicle) (*ParkingSpot, error) {
 			return spot, nil
 		}
 	}
-	return nil, errors.New("no available spot found for this vehicle size.")
+	return nil, errors.New("no available spot found for this vehicle size")
 }
 
-func (pm *ParkingManager) ReleaseSpot(spotID string) error {
+func (pm *ParkingManager) ReleaseSpot(spotID int) error {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 
 	for _, spot := range pm.spots {
-		if spot.SpotID == spotID {
+		if spot.ID == spotID {
 			if !spot.IsOccupied {
 				return errors.New("spot is already empty")
 			}
@@ -179,6 +178,10 @@ func (pm *ParkingManager) ReleaseSpot(spotID string) error {
 	return errors.New("spot not found")
 }
 
+// ==========================================
+// 5. Facade (ParkingLot)
+// ==========================================
+
 type ParkingLot struct {
 	manager    *ParkingManager
 	calculator *FareCalculator
@@ -187,12 +190,14 @@ type ParkingLot struct {
 }
 
 func NewParkingLot(manager *ParkingManager) *ParkingLot {
+
 	return &ParkingLot{
 		manager:    manager,
 		calculator: &FareCalculator{strategy: &PeakHoursFareStrategy{}},
 		tickets:    make(map[string]*Ticket),
 	}
 }
+
 
 func (pl *ParkingLot) ParkVehicle(v *Vehicle) (*Ticket, error) {
 	spot, err := pl.manager.FindAndAssignSpot(v)
@@ -204,15 +209,17 @@ func (pl *ParkingLot) ParkVehicle(v *Vehicle) (*Ticket, error) {
 	ticket := &Ticket{
 		ID:           ticketID,
 		VehiclePlate: v.LicensePlate,
-		SpotID:       spot.SpotID,
+		SpotID:       spot.ID,
 		EntryTime:    time.Now(),
 	}
 
+	// 3. Persist Ticket
 	pl.mu.Lock()
 	pl.tickets[ticketID] = ticket
 	pl.mu.Unlock()
-	fmt.Printf("[Entry] %s (%s) parked at Spot %d (%s). Ticket: %s\n",
-		v.LicensePlate, v.Size, spot.SpotID, spot.Type, ticketID)
+
+	fmt.Printf("[Entry] %s (%s) parked at Spot %d (%s). Ticket: %s\n", 
+        v.LicensePlate, v.Size, spot.ID, spot.Type, ticketID)
 	return ticket, nil
 }
 
@@ -227,9 +234,11 @@ func (pl *ParkingLot) ExitVehicle(ticketID string, vSize VehicleSize) (float64, 
 	delete(pl.tickets, ticketID)
 	pl.mu.Unlock()
 
+	// 1. Calculate Fee via Strategy
 	fee := pl.calculator.CalculateFee(*ticket, vSize)
 
-	err := pl.manager.ReleaseSpot((ticket.SpotID))
+	// 2. Free the Spot via Manager
+	err := pl.manager.ReleaseSpot(ticket.SpotID)
 	if err != nil {
 		return fee, fmt.Errorf("fee %.2f calculated, but error releasing spot: %v", fee, err)
 	}
@@ -242,43 +251,32 @@ func main() {
 	manager := NewParkingManager(2, 2, 1)
 	parkingLot := NewParkingLot(manager)
 
-	fmt.Println(" Parking Lot System Started ")
+	fmt.Println("--- Parking Lot System Started ---")
 
-	vehicles := []*Vehicle{
-		{LicensePlate: "MOTO-01", Size: Small},
-		{LicensePlate: "CAR-01", Size: Medium},
-		{LicensePlate: "TRUCK-01", Size: Large},
-	}
+	moto := &Vehicle{LicensePlate: "MOTO-01", Size: Small}
+	ticket1, _ := parkingLot.ParkVehicle(moto)
 
-	var tickets []*Ticket
+	car := &Vehicle{LicensePlate: "CAR-01", Size: Medium}
+	ticket2, _ := parkingLot.ParkVehicle(car)
 
-	for _, v := range vehicles {
-		ticket, err := parkingLot.ParkVehicle(v)
-		if err != nil {
-			fmt.Println("[Entry Failed]", err)
-			continue
-		}
-		tickets = append(tickets, ticket)
-	}
+	truck := &Vehicle{LicensePlate: "TRUCK-01", Size: Large}
+	ticket3, _ := parkingLot.ParkVehicle(truck)
 
-	_, err := parkingLot.ParkVehicle(&Vehicle{
-		LicensePlate: "TRUCK-02",
-		Size:         Large,
-	})
+	truck2 := &Vehicle{LicensePlate: "TRUCK-02", Size: Large}
+	_, err := parkingLot.ParkVehicle(truck2)
 	if err != nil {
-		fmt.Println("[Entry Denied]", err)
+		fmt.Printf("[Entry Denied] %v\n", err)
 	}
 
-	time.Sleep(2 * time.Second)
-
+	time.Sleep(500 * time.Millisecond)
 	fmt.Println("\n--- Processing Exits ---")
 
-	for i, ticket := range tickets {
-		fee, err := parkingLot.ExitVehicle(ticket.ID, vehicles[i].Size)
-		if err != nil {
-			fmt.Println("[Exit Error]", err)
-			continue
-		}
-		fmt.Printf("Vehicle %s paid ₹%.2f\n", vehicles[i].LicensePlate, fee)
-	}
+	parkingLot.ExitVehicle(ticket2.ID, Medium)
+
+	car2 := &Vehicle{LicensePlate: "CAR-02", Size: Medium}
+	parkingLot.ParkVehicle(car2)
+    
+	parkingLot.ExitVehicle(ticket1.ID, Small)
+    
+ 	parkingLot.ExitVehicle(ticket3.ID, Large)
 }
