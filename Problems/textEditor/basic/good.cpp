@@ -1,7 +1,9 @@
 #include<iostream>
 #include<vector>
 #include<string>
+#include<fstream>
 
+using namespace std;
 class DocumentElement{
 public:
     virtual string render()=0;
@@ -27,12 +29,13 @@ private:
     string img;
 
 public:
-    TextElement(string img){
+    ImageElement(string img){
         this->img=img;
     }
 
+    
     string render() override{
-        return "[Image:"+text+"]";
+        return "[Image:"+img+"]";
     }
 
 };
@@ -57,6 +60,30 @@ public:
             result += element->render();
         }
         return result;
+    }
+};
+
+class Persistence{
+public:
+    virtual void save(string data)=0;
+};
+
+class DBPersistence: public Persistence{
+    void save(string data) override{
+        // SAVED TO DB
+    }
+};
+
+class FileStorage: public Persistence{
+    void save(string data) override{
+        ofstream outFile("document.txt");
+        if (outFile) {
+            outFile << data;
+            outFile.close();
+            cout << "Document saved to document.txt" << endl;
+        } else {
+            cout << "Error: Unable to open file for writing." << endl;
+        }
     }
 };
 
@@ -85,11 +112,6 @@ public:
         document->addElement(new NewLineElement());
     }
 
-    // Adds a tab space to the document.
-    void addTabSpace() {
-        document->addElement(new TabSpaceElement());
-    }
-
     string renderDocument() {
         if(renderedDocument.empty()) {
             renderedDocument = document->render();
@@ -112,7 +134,6 @@ int main() {
     editor->addNewLine();
     editor->addText("This is a real-world document editor example.");
     editor->addNewLine();
-    editor->addTabSpace();
     editor->addText("Indented text after a tab space.");
     editor->addNewLine();
     editor->addImage("picture.jpg");
